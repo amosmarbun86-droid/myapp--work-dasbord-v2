@@ -85,8 +85,7 @@ router.delete('/:id', checkAdmin, async (req, res) => {
     }
 
     const data = doc.data();
-    if (data.foto_path) {
-      await supabase.storage.from('Absensi')').remove([data.foto_path]);
+    if (data.foto_path) {await supabase.storage.from('Absensi').remove([data.foto_path]);
     }
     await ref.delete();
     res.json({ message: 'Absensi dihapus.' });
