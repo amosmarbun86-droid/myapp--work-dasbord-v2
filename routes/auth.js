@@ -1,5 +1,5 @@
 // routes/auth.js
-// Endpoint untuk daftar akun baru dan login.
+// Endpoint untuk daftar akun baru dan login, sekarang pakai Firestore.
 
 const express = require('express');
 const bcrypt = require('bcryptjs');
@@ -8,7 +8,6 @@ const db = require('../models/db');
 
 const router = express.Router();
 
-// POST /auth/register
 router.post('/register', async (req, res) => {
   const { email, password } = req.body;
 
@@ -20,29 +19,25 @@ router.post('/register', async (req, res) => {
   }
 
   try {
-    const existing = db.get('users').find({ email }).value();
-    if (existing) {
+    const existing = await db.collection('users').where('email', '==', email).limit(1).get();
+    if (!existing.empty) {
       return res.status(409).json({ error: 'Email sudah terdaftar.' });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-    const newId = Date.now(); // id unik pakai timestamp
-
-    db.get('users')
-      .push({ id: newId, email, password: hashedPassword, created_at: new Date().toISOString() })
-      .write();
-
-    res.status(201).json({
-      message: 'Berhasil daftar!',
-      userId: newId,
+    const docRef = await db.collection('users').add({
+      email,
+      password: hashedPassword,
+      created_at: new Date().toISOString(),
     });
+
+    res.status(201).json({ message: 'Berhasil daftar!', userId: docRef.id });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Terjadi kesalahan di server.' });
   }
 });
 
-// POST /auth/login
 router.post('/login', async (req, res) => {
   const { email, password } = req.body;
 
@@ -51,25 +46,21 @@ router.post('/login', async (req, res) => {
   }
 
   try {
-    const user = db.get('users').find({ email }).value();
-    if (!user) {
+    const snapshot = await db.collection('users').where('email', '==', email).limit(1).get();
+    if (snapshot.empty) {
       return res.status(401).json({ error: 'Email atau password salah.' });
     }
 
+    const doc = snapshot.docs[0];
+    const user = doc.data();
     const passwordMatch = await bcrypt.compare(password, user.password);
     if (!passwordMatch) {
       return res.status(401).json({ error: 'Email atau password salah.' });
     }
 
-    const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, {
-      expiresIn: '7d',
-    });
+    const token = jwt.sign({ userId: doc.id }, process.env.JWT_SECRET, { expiresIn: '7d' });
 
-    res.json({
-      message: 'Berhasil login!',
-      token,
-      user: { id: user.id, email: user.email },
-    });
+    res.json({ message: 'Berhasil login!', token, user: { id: doc.id, email: user.email } });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Terjadi kesalahan di server.' });
