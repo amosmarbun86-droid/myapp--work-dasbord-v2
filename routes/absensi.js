@@ -51,7 +51,7 @@ router.post('/', upload.single('foto'), async (req, res) => {
     const namaFile = `${namaKaryawan}_${tipe}_${waktuFile}.${ext}`;
 
     const { error: uploadError } = await supabase.storage
-      .from('absensi-foto')
+      .from('Absensi')
       .upload(namaFile, req.file.buffer, { contentType: req.file.mimetype });
 
     if (uploadError) {
@@ -59,7 +59,7 @@ router.post('/', upload.single('foto'), async (req, res) => {
       return res.status(500).json({ error: 'Gagal upload foto ke storage.' });
     }
 
-    const { data: publicUrlData } = supabase.storage.from('absensi-foto').getPublicUrl(namaFile);
+    const { data: publicUrlData } = supabase.storage.from('Absensi').getPublicUrl(namaFile);
 
     const absensiBaru = {
       nama,
@@ -86,7 +86,7 @@ router.delete('/:id', checkAdmin, async (req, res) => {
 
     const data = doc.data();
     if (data.foto_path) {
-      await supabase.storage.from('absensi-foto').remove([data.foto_path]);
+      await supabase.storage.from('Absensi')').remove([data.foto_path]);
     }
     await ref.delete();
     res.json({ message: 'Absensi dihapus.' });
