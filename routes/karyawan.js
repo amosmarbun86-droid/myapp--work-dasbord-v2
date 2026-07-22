@@ -1,5 +1,7 @@
 // routes/karyawan.js
-// Data karyawan sekarang tersimpan permanen di Firestore.
+// Data karyawan tersimpan permanen di Firestore.
+// Termasuk endpoint buat mendaftarkan "sidik wajah" (face descriptor)
+// yang dipakai buat cek kecocokan wajah saat absen.
 
 const express = require('express');
 const db = require('../models/db');
@@ -40,6 +42,29 @@ router.post('/', checkAdmin, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Gagal menambah karyawan.' });
+  }
+});
+
+// POST /karyawan/:no/wajah -> simpan "sidik wajah" (descriptor) karyawan (khusus admin)
+// Body: { descriptor: [128 angka] } -- dihitung di browser pakai face-api.js
+router.post('/:no/wajah', checkAdmin, async (req, res) => {
+  const no = Number(req.params.no);
+  const { descriptor } = req.body;
+
+  if (!Array.isArray(descriptor) || descriptor.length !== 128) {
+    return res.status(400).json({ error: 'Data wajah tidak valid.' });
+  }
+
+  try {
+    const snapshot = await db.collection('karyawan').where('no', '==', no).limit(1).get();
+    if (snapshot.empty) {
+      return res.status(404).json({ error: 'Karyawan tidak ditemukan.' });
+    }
+    await snapshot.docs[0].ref.update({ faceDescriptor: descriptor });
+    res.json({ message: 'Wajah berhasil didaftarkan.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Gagal menyimpan data wajah.' });
   }
 });
 
