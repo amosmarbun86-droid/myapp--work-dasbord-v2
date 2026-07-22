@@ -1,6 +1,5 @@
 // routes/karyawan.js
-// Endpoint untuk data karyawan (dipakai buat generate jadwal shift).
-// GET boleh diakses siapa saja (buat lihat jadwal). Tambah/hapus khusus admin.
+// Data karyawan sekarang tersimpan permanen di Firestore.
 
 const express = require('express');
 const db = require('../models/db');
@@ -8,47 +7,59 @@ const checkAdmin = require('../middleware/checkAdmin');
 
 const router = express.Router();
 
-// GET /karyawan -> daftar semua karyawan (publik)
-router.get('/', (req, res) => {
-  const karyawan = db.get('karyawan').orderBy(['no'], ['asc']).value();
-  res.json(karyawan);
+router.get('/', async (req, res) => {
+  try {
+    const snapshot = await db.collection('karyawan').orderBy('no', 'asc').get();
+    const karyawan = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    res.json(karyawan);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Gagal mengambil data karyawan.' });
+  }
 });
 
-// POST /karyawan -> tambah karyawan baru (khusus admin)
-// Body (JSON): { "nama": "Budi", "title": "NEK" }
-router.post('/', checkAdmin, (req, res) => {
+router.post('/', checkAdmin, async (req, res) => {
   const { nama, title } = req.body;
-
   if (!nama) {
     return res.status(400).json({ error: 'Nama wajib diisi.' });
   }
 
-  const semua = db.get('karyawan').value();
-  const noBaru = semua.length > 0 ? Math.max(...semua.map((k) => k.no)) + 1 : 1;
+  try {
+    const snapshot = await db.collection('karyawan').orderBy('no', 'desc').limit(1).get();
+    const noBaru = snapshot.empty ? 1 : snapshot.docs[0].data().no + 1;
 
-  const karyawanBaru = {
-    no: noBaru,
-    nama,
-    title: title || '',
-    created_at: new Date().toISOString(),
-  };
+    const karyawanBaru = {
+      no: noBaru,
+      nama,
+      title: title || '',
+      created_at: new Date().toISOString(),
+    };
+    const docRef = await db.collection('karyawan').add(karyawanBaru);
 
-  db.get('karyawan').push(karyawanBaru).write();
-
-  res.status(201).json(karyawanBaru);
+    res.status(201).json({ id: docRef.id, ...karyawanBaru });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Gagal menambah karyawan.' });
+  }
 });
 
-// DELETE /karyawan/:no -> hapus karyawan berdasarkan nomor (khusus admin)
-router.delete('/:no', checkAdmin, (req, res) => {
+router.delete('/:no', checkAdmin, async (req, res) => {
   const no = Number(req.params.no);
+  try {
+    const snapshot = await db.collection('karyawan').where('no', '==', no).get();
+    if (snapshot.empty) {
+      return res.status(404).json({ error: 'Karyawan tidak ditemukan.' });
+    }
 
-  const karyawan = db.get('karyawan').find({ no }).value();
-  if (!karyawan) {
-    return res.status(404).json({ error: 'Karyawan tidak ditemukan.' });
+    const batch = db.batch();
+    snapshot.docs.forEach((doc) => batch.delete(doc.ref));
+    await batch.commit();
+
+    res.json({ message: 'Karyawan dihapus.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Gagal menghapus karyawan.' });
   }
-
-  db.get('karyawan').remove({ no }).write();
-  res.json({ message: 'Karyawan dihapus.' });
 });
 
 module.exports = router;
