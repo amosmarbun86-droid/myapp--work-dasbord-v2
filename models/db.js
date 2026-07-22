@@ -1,54 +1,58 @@
 // models/db.js
-// Pakai lowdb: database murni JavaScript, tersimpan di 1 file "db.json".
-// Tidak perlu compile/install database terpisah -> aman dijalankan di Termux.
+// Database sekarang pakai Firestore (Firebase), bukan file lokal lagi.
+// Jadi data aman permanen walau server Render restart/sleep.
 
-const low = require('lowdb');
-const FileSync = require('lowdb/adapters/FileSync');
+const admin = require('firebase-admin');
 const bcrypt = require('bcryptjs');
 
-const adapter = new FileSync('db.json');
-const db = low(adapter);
+function loadServiceAccount() {
+  const b64 = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64;
+  if (!b64) {
+    throw new Error('FIREBASE_SERVICE_ACCOUNT_BASE64 belum diatur di Environment Variables.');
+  }
+  const json = Buffer.from(b64, 'base64').toString('utf8');
+  return JSON.parse(json);
+}
 
-// Nilai awal kalau db.json masih kosong
-db.defaults({ users: [], items: [], karyawan: [], absensi: [] }).write();
+admin.initializeApp({
+  credential: admin.credential.cert(loadServiceAccount()),
+});
+
+const db = admin.firestore();
 
 // ================== SEED ADMIN ==================
 // Buat 1 akun admin otomatis saat server pertama kali jalan,
-// berdasarkan ADMIN_EMAIL & ADMIN_PASSWORD di file .env.
-// Kalau akun dengan email itu sudah ada, tidak dibuat ulang.
-function seedAdmin() {
+// berdasarkan ADMIN_EMAIL & ADMIN_PASSWORD di Environment Variables.
+async function seedAdmin() {
   const adminEmail = process.env.ADMIN_EMAIL;
   const adminPassword = process.env.ADMIN_PASSWORD;
 
   if (!adminEmail || !adminPassword) {
-    console.warn('⚠️  ADMIN_EMAIL / ADMIN_PASSWORD belum diatur di .env — akun admin tidak dibuat.');
+    console.warn('⚠️  ADMIN_EMAIL / ADMIN_PASSWORD belum diatur — akun admin tidak dibuat.');
     return;
   }
 
-  const existing = db.get('users').find({ email: adminEmail }).value();
-  if (existing) {
-    // Pastikan role-nya tetap admin walau akun sudah ada sebelumnya
-    if (existing.role !== 'admin') {
-      db.get('users').find({ email: adminEmail }).assign({ role: 'admin' }).write();
+  const snapshot = await db.collection('users').where('email', '==', adminEmail).limit(1).get();
+
+  if (!snapshot.empty) {
+    const doc = snapshot.docs[0];
+    if (doc.data().role !== 'admin') {
+      await doc.ref.update({ role: 'admin' });
     }
     return;
   }
 
   const hashedPassword = bcrypt.hashSync(adminPassword, 10);
-
-  db.get('users')
-    .push({
-      id: Date.now(),
-      email: adminEmail,
-      password: hashedPassword,
-      role: 'admin',
-      created_at: new Date().toISOString(),
-    })
-    .write();
+  await db.collection('users').add({
+    email: adminEmail,
+    password: hashedPassword,
+    role: 'admin',
+    created_at: new Date().toISOString(),
+  });
 
   console.log(`✅ Akun admin dibuat otomatis: ${adminEmail}`);
 }
 
-seedAdmin();
+seedAdmin().catch((err) => console.error('Gagal membuat akun admin:', err.message));
 
 module.exports = db;
