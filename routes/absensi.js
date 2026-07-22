@@ -1,6 +1,8 @@
 // routes/absensi.js
-// Endpoint untuk absensi karyawan + upload foto absen.
-// Publik (tanpa login) supaya karyawan bisa absen langsung dari HP masing-masing.
+// Metadata absensi (nama, waktu, status) tersimpan permanen di Firestore.
+// Catatan: foto masih disimpan di disk server (belum pakai Firebase Storage),
+// jadi foto tetap bisa hilang kalau server restart -- ini bisa disambungkan
+// ke Storage nanti kalau diaktifkan.
 
 const express = require('express');
 const multer = require('multer');
@@ -10,7 +12,6 @@ const db = require('../models/db');
 
 const router = express.Router();
 
-// Folder penyimpanan foto absensi
 const uploadDir = path.join(__dirname, '..', 'uploads');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
@@ -28,7 +29,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // maks 5MB per foto
+  limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     if (!file.mimetype.startsWith('image/')) {
       return cb(new Error('File harus berupa gambar.'));
@@ -37,17 +38,19 @@ const upload = multer({
   },
 });
 
-// GET /absensi -> daftar log absensi, terbaru dulu (publik)
-router.get('/', (req, res) => {
-  const absensi = db.get('absensi').orderBy(['waktu'], ['desc']).value();
-  res.json(absensi);
+router.get('/', async (req, res) => {
+  try {
+    const snapshot = await db.collection('absensi').orderBy('waktu', 'desc').get();
+    const absensi = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    res.json(absensi);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Gagal mengambil data absensi.' });
+  }
 });
 
-// POST /absensi -> simpan absensi baru + upload foto
-// Kirim sebagai multipart/form-data dengan field: nama (text), foto (file)
-router.post('/', upload.single('foto'), (req, res) => {
+router.post('/', upload.single('foto'), async (req, res) => {
   const { nama } = req.body;
-
   if (!nama) {
     return res.status(400).json({ error: 'Nama wajib diisi.' });
   }
@@ -55,17 +58,19 @@ router.post('/', upload.single('foto'), (req, res) => {
     return res.status(400).json({ error: 'Foto wajib diupload.' });
   }
 
-  const absensiBaru = {
-    id: Date.now(),
-    nama,
-    waktu: new Date().toISOString(),
-    status: 'Hadir',
-    foto_url: `/uploads/${req.file.filename}`,
-  };
-
-  db.get('absensi').push(absensiBaru).write();
-
-  res.status(201).json(absensiBaru);
+  try {
+    const absensiBaru = {
+      nama,
+      waktu: new Date().toISOString(),
+      status: 'Hadir',
+      foto_url: `/uploads/${req.file.filename}`,
+    };
+    const docRef = await db.collection('absensi').add(absensiBaru);
+    res.status(201).json({ id: docRef.id, ...absensiBaru });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Gagal menyimpan absensi.' });
+  }
 });
 
 module.exports = router;
