@@ -1,34 +1,15 @@
 // routes/absensi.js
-// Metadata absensi (nama, waktu, status) tersimpan permanen di Firestore.
-// Catatan: foto masih disimpan di disk server (belum pakai Firebase Storage),
-// jadi foto tetap bisa hilang kalau server restart -- ini bisa disambungkan
-// ke Storage nanti kalau diaktifkan.
+// Metadata absensi tersimpan di Firestore, foto tersimpan permanen di Supabase Storage.
 
 const express = require('express');
 const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
 const db = require('../models/db');
+const supabase = require('../models/supabase');
 
 const router = express.Router();
 
-const uploadDir = path.join(__dirname, '..', 'uploads');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) => {
-    const namaKaryawan = (req.body.nama || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '_');
-    const waktu = new Date().toISOString().replace(/[:.]/g, '-');
-    const ext = path.extname(file.originalname) || '.jpg';
-    cb(null, `${namaKaryawan}_${waktu}${ext}`);
-  },
-});
-
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     if (!file.mimetype.startsWith('image/')) {
@@ -59,11 +40,28 @@ router.post('/', upload.single('foto'), async (req, res) => {
   }
 
   try {
+    const namaKaryawan = nama.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const waktuFile = new Date().toISOString().replace(/[:.]/g, '-');
+    const ext = req.file.originalname.split('.').pop() || 'jpg';
+    const namaFile = `${namaKaryawan}_${waktuFile}.${ext}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('absensi-foto')
+      .upload(namaFile, req.file.buffer, { contentType: req.file.mimetype });
+
+    if (uploadError) {
+      console.error(uploadError);
+      return res.status(500).json({ error: 'Gagal upload foto ke storage.' });
+    }
+
+    const { data: publicUrlData } = supabase.storage.from('absensi-foto').getPublicUrl(namaFile);
+    const fotoUrl = publicUrlData.publicUrl;
+
     const absensiBaru = {
       nama,
       waktu: new Date().toISOString(),
       status: 'Hadir',
-      foto_url: `/uploads/${req.file.filename}`,
+      foto_url: fotoUrl,
     };
     const docRef = await db.collection('absensi').add(absensiBaru);
     res.status(201).json({ id: docRef.id, ...absensiBaru });
