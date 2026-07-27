@@ -7,6 +7,7 @@ const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
 });
 
+// Cek apakah API aktif
 router.get("/", (req, res) => {
   res.json({
     success: true,
@@ -14,6 +15,7 @@ router.get("/", (req, res) => {
   });
 });
 
+// Chat AI
 router.post("/", async (req, res) => {
   try {
     const { message } = req.body;
@@ -25,30 +27,36 @@ router.post("/", async (req, res) => {
       });
     }
 
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: `
+    const prompt = `
 Kamu adalah ShiftBoard AI Assistant.
 
-Jawablah dalam Bahasa Indonesia.
+Tugasmu:
+- Jawab dalam Bahasa Indonesia.
+- Bersikap ramah, profesional, dan singkat.
+- Membantu tentang absensi, jadwal kerja, shift, data karyawan, cuti, dan penggunaan aplikasi ShiftBoard.
+- Jika pertanyaan di luar ShiftBoard, tetap jawab dengan baik.
 
-Pengguna bertanya:
+Pertanyaan pengguna:
 ${message}
-`
+`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: prompt,
     });
 
     res.json({
       success: true,
-      reply: response.text
+      reply: response.text,
     });
 
-  } catch (error) {
-    console.error(error);
+  } catch (err) {
+    console.error(err);
 
     res.status(500).json({
       success: false,
       reply: "Terjadi kesalahan pada Gemini AI.",
-      error: error.message
+      error: err.message,
     });
   }
 });
