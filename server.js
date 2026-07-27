@@ -2,6 +2,7 @@
 // Titik masuk utama aplikasi server.
 
 require('dotenv').config();
+
 const express = require('express');
 const cors = require('cors');
 
@@ -9,35 +10,87 @@ const authRoutes = require('./routes/auth');
 const dataRoutes = require('./routes/data');
 const karyawanRoutes = require('./routes/karyawan');
 const absensiRoutes = require('./routes/absensi');
+const chatRoutes = require('./routes/chat'); // AI Chat
+
 const checkToken = require('./middleware/checkToken');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(cors()); // biar app mobile & web boleh akses server ini
-app.use(express.json()); // biar server bisa baca data JSON dari request
+// Middleware
+app.use(cors());
+app.use(express.json());
 
-// Biar foto absensi yang diupload bisa diakses lewat URL, misal:
-// https://server-kamu/uploads/nama_file.jpg
+// Folder upload
 app.use('/uploads', express.static('uploads'));
 
-// Endpoint tes, buka di browser: http://localhost:3000
+// Test server
 app.get('/', (req, res) => {
-  res.send('Server jalan! 🚀');
+    res.json({
+        success: true,
+        message: 'ShiftBoard API Server',
+        version: '2.0',
+        ai: 'GPT-5.5',
+        status: 'Running'
+    });
 });
 
-// Endpoint auth: /auth/register, /auth/login (tidak butuh login dulu)
+// =====================
+// AUTH
+// =====================
 app.use('/auth', authRoutes);
 
-// Endpoint data: /data (WAJIB login, makanya dikasih checkToken)
+// =====================
+// DATA (WAJIB LOGIN)
+// =====================
 app.use('/data', checkToken, dataRoutes);
 
-// Endpoint karyawan: GET publik, POST/DELETE khusus admin (dicek di dalam route-nya)
+// =====================
+// KARYAWAN
+// =====================
 app.use('/karyawan', karyawanRoutes);
 
-// Endpoint absensi: publik (karyawan absen tanpa perlu login)
+// =====================
+// ABSENSI
+// =====================
 app.use('/absensi', absensiRoutes);
 
+// =====================
+// AI CHAT
+// Endpoint:
+// POST /api/chat
+// =====================
+app.use('/api/chat', chatRoutes);
+
+// =====================
+// 404
+// =====================
+app.use((req, res) => {
+    res.status(404).json({
+        success: false,
+        message: 'Endpoint tidak ditemukan'
+    });
+});
+
+// =====================
+// Error Handler
+// =====================
+app.use((err, req, res, next) => {
+    console.error(err);
+
+    res.status(500).json({
+        success: false,
+        message: 'Internal Server Error'
+    });
+});
+
+// =====================
+// Start Server
+// =====================
 app.listen(PORT, () => {
-  console.log(`Server nyala di http://localhost:${PORT}`);
+    console.log('================================');
+    console.log('ShiftBoard API berjalan');
+    console.log(`Port : ${PORT}`);
+    console.log(`URL  : http://localhost:${PORT}`);
+    console.log('================================');
 });
