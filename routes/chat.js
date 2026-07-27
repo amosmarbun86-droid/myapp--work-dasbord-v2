@@ -7,6 +7,14 @@ const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+
+router.get("/", (req, res) => {
+  res.json({
+    success: true,
+    message: "ShiftBoard AI Chat API aktif"
+  });
+});
+
 router.post("/", async (req, res) => {
   try {
     const { message } = req.body;
