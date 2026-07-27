@@ -1,17 +1,16 @@
 const express = require("express");
-const OpenAI = require("openai");
+const { GoogleGenAI } = require("@google/genai");
 
 const router = express.Router();
 
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+const ai = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY,
 });
-
 
 router.get("/", (req, res) => {
   res.json({
     success: true,
-    message: "ShiftBoard AI Chat API aktif"
+    message: "ShiftBoard AI Chat API aktif (Gemini)"
   });
 });
 
@@ -26,24 +25,21 @@ router.post("/", async (req, res) => {
       });
     }
 
-    const response = await client.responses.create({
-      model: "gpt-5.5",
-      input: [
-        {
-          role: "system",
-          content:
-            "Kamu adalah ShiftBoard AI Assistant. Bantu pengguna mengenai absensi, jadwal kerja, data karyawan, dan pertanyaan umum. Jawablah dalam bahasa Indonesia yang sopan, jelas, dan singkat."
-        },
-        {
-          role: "user",
-          content: message
-        }
-      ]
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: `
+Kamu adalah ShiftBoard AI Assistant.
+
+Jawablah dalam Bahasa Indonesia.
+
+Pengguna bertanya:
+${message}
+`
     });
 
     res.json({
       success: true,
-      reply: response.output_text
+      reply: response.text
     });
 
   } catch (error) {
@@ -51,7 +47,7 @@ router.post("/", async (req, res) => {
 
     res.status(500).json({
       success: false,
-      reply: "Terjadi kesalahan pada AI.",
+      reply: "Terjadi kesalahan pada Gemini AI.",
       error: error.message
     });
   }
