@@ -7,8 +7,7 @@ const router = express.Router();
 const POLA_SHIFT = ["OFF", "2", "2", "2", "OFF", "1", "1", "1", "OFF", "3", "3", "3"];
 const ANCHOR_TANGGAL = Date.UTC(2026, 2, 1); // 1 Maret 2026 (bulan di JS mulai dari 0)
 
-// Ambil waktu sekarang yang sudah dikonversi ke zona WIB (Asia/Jakarta),
-// supaya tidak salah tanggal/hari akibat server Render pakai UTC.
+// Ambil waktu sekarang yang sudah dikonversi ke zona WIB (Asia/Jakarta)
 function ambilWaktuJakartaSekarang() {
   const jakartaString = new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" });
   return new Date(jakartaString);
@@ -21,6 +20,11 @@ function getShiftTanggal(tahun, bulanIndex, tanggal) {
   return POLA_SHIFT[posisi];
 }
 
+function getDayName(date) {
+  const namaHari = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
+  return namaHari[date.getDay()];
+}
+
 function buatRingkasanBulan(tahun, bulanIndex) {
   const namaBulan = [
     "Januari", "Februari", "Maret", "April", "Mei", "Juni",
@@ -29,12 +33,22 @@ function buatRingkasanBulan(tahun, bulanIndex) {
   const jumlahHari = new Date(tahun, bulanIndex + 1, 0).getDate();
   const counts = { OFF: 0, "1": 0, "2": 0, "3": 0 };
   const baris = [];
+  const labelShift = { "1": "Malam", "2": "Pagi", "3": "Sore" };
+
+  // Buat tanggal awal bulan untuk mendapatkan nama hari
+  const tanggalAwal = new Date(tahun, bulanIndex, 1);
+  const startDay = tanggalAwal.getDay();
 
   for (let i = 1; i <= jumlahHari; i++) {
     const shift = getShiftTanggal(tahun, bulanIndex, i);
     counts[shift]++;
-    const labelShift = { "1": "Malam", "2": "Pagi", "3": "Sore" };
-baris.push(`${i} ${namaBulan[bulanIndex]}: ${shift === "OFF" ? "OFF (libur)" : "Shift " + shift + " (" + labelShift[shift] + ")"}`);
+    
+    // Hitung nama hari berdasarkan tanggal
+    const currentDate = new Date(tahun, bulanIndex, i);
+    const namaHari = getDayName(currentDate);
+    
+    const keterangan = shift === "OFF" ? "OFF (libur)" : "Shift " + shift + " (" + labelShift[shift] + ")";
+    baris.push(`${namaHari}, ${i} ${namaBulan[bulanIndex]}: ${keterangan}`);
   }
 
   return {
@@ -88,23 +102,23 @@ async function ambilKonteksData() {
     teks += "\n(Gagal mengambil data absensi)\n";
   }
 
-  // Jadwal shift bulan ini & bulan depan (semua dihitung berdasarkan waktu WIB, bukan UTC server)
+  // Jadwal shift bulan ini & bulan depan (semua dihitung berdasarkan waktu WIB)
   const sekarang = ambilWaktuJakartaSekarang();
-  const namaHari = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"][sekarang.getDay()];
+  const namaHariIni = getDayName(sekarang);
 
   const bulanIni = buatRingkasanBulan(sekarang.getFullYear(), sekarang.getMonth());
   const tanggalBulanDepan = new Date(sekarang.getFullYear(), sekarang.getMonth() + 1, 1);
   const bulanDepan = buatRingkasanBulan(tanggalBulanDepan.getFullYear(), tanggalBulanDepan.getMonth());
 
-  teks += `\nHari ini: ${namaHari}, ${sekarang.getDate()} ${bulanIni.judul.split(" ")[0]} ${sekarang.getFullYear()} (waktu WIB/Asia Jakarta, ini sumber kebenaran satu-satunya soal tanggal dan hari, jangan dihitung ulang).\n`;
+  teks += `\nHari ini: ${namaHariIni}, ${sekarang.getDate()} ${bulanIni.judul.split(" ")[0]} ${sekarang.getFullYear()} (waktu WIB/Asia Jakarta, ini sumber kebenaran satu-satunya soal tanggal dan hari, jangan dihitung ulang).\n`;
 
   teks += `\nPola shift berlaku sama untuk semua karyawan tiap harinya, siklus 12 hari (OFF-2-2-2-OFF-1-1-1-OFF-3-3-3), dimulai dari 1 Maret 2026.\n`;
   
   teks += `\nKeterangan jam kerja: Shift 1 = Malam, Shift 2 = Pagi, Shift 3 = Sore.\n`;
  
-  teks += `\nJadwal shift bulan ${bulanIni.judul} (bulan berjalan):\n${bulanIni.detail}\n${bulanIni.ringkasan}\n`;
+  teks += `\nJadwal shift LENGKAP bulan ${bulanIni.judul} (bulan berjalan) - format: Hari, Tanggal: Shift:\n${bulanIni.detail}\n${bulanIni.ringkasan}\n`;
 
-  teks += `\nJadwal shift bulan ${bulanDepan.judul} (bulan depan):\n${bulanDepan.detail}\n${bulanDepan.ringkasan}\n`;
+  teks += `\nJadwal shift LENGKAP bulan ${bulanDepan.judul} (bulan depan) - format: Hari, Tanggal: Shift:\n${bulanDepan.detail}\n${bulanDepan.ringkasan}\n`;
 
   return teks;
 }
@@ -130,7 +144,7 @@ Tugasmu:
 - Bersikap ramah, profesional, dan singkat.
 - Membantu tentang absensi, jadwal kerja, shift, data karyawan, cuti, dan penggunaan aplikasi ShiftBoard.
 - Kalau pertanyaan berhubungan dengan data karyawan/absensi/jadwal shift, jawab berdasarkan data di bawah ini. Jangan mengarang data yang tidak ada.
-- SOAL TANGGAL DAN HARI: gunakan PERSIS informasi "Hari ini: ..." di data di bawah, JANGAN pernah menghitung atau menebak nama hari sendiri, karena kamu sering salah hitung.
+- SOAL TANGGAL DAN HARI: gunakan data jadwal di bawah yang SUDAH LENGKAP dengan hari dan tanggal. Jawab PERSIS dari data yang diberikan, JANGAN pernah menghitung atau menebak nama hari sendiri.
 - Kalau user tanya soal tanggal/bulan di luar data yang diberikan (misal lebih dari 2 bulan ke depan), bilang terus terang kalau datanya belum tersedia, jangan menebak.
 - Jika pertanyaan di luar ShiftBoard, tetap jawab dengan baik.
 
