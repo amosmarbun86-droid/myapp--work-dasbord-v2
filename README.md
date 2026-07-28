@@ -1,162 +1,114 @@
 # MyApp Server
 
-Server API sederhana buat aplikasi mobile + web kamu. Punya fitur:
+Server API sederhana untuk aplikasi mobile + web — fitur:
 - Daftar & login akun (pakai token JWT)
 - Simpan, ambil, edit, hapus data (khusus milik user yang login)
+- Manajemen karyawan & absensi, upload foto
+- Endpoint chat AI (opsional, tergantung konfigurasi)
 
-Database pakai **SQLite** (tersimpan di 1 file `app.db`, otomatis dibuat saat
-server pertama kali jalan) — jadi kamu nggak perlu install database terpisah
-buat belajar/development. Kalau nanti mau production skala besar, tinggal
-ganti bagian `models/db.js` ke PostgreSQL.
+Perubahan penting: aplikasi ini menggunakan Firebase Firestore (melalui `firebase-admin`) sebagai penyimpanan, bukan SQLite. README sebelumnya menyebut `app.db`/SQLite — itu sudah tidak sesuai dengan implementasi saat ini (lihat `models/db.js`).
 
-## Cara Menjalankan
+## Stack
+- **Language(s):** JavaScript (Node.js)
+- **Framework / runtime:** Node.js + Express
+- **Notable libraries:** `firebase-admin`, `jsonwebtoken`, `multer`, `bcryptjs`
 
-1. Pastikan sudah install [Node.js](https://nodejs.org) (versi 18 ke atas)
-2. Install dependencies:
-   ```
-   npm install
-   ```
-3. Salin file `.env.example` jadi `.env`, lalu ganti `JWT_SECRET` dengan teks
-   acak (bebas, makin panjang makin aman):
-   ```
-   cp .env.example .env
-   ```
+## Cara Menjalankan (singkat)
+1. Install dependencies:
+
+```bash
+npm install
+```
+
+2. Salin file contoh environment dan edit:
+
+```bash
+cp .env.example .env
+```
+
+3. Isi variabel environment penting di `.env` (lihat penjelasan di bawah).
+
 4. Jalankan server:
-   ```
-   npm start
-   ```
-5. Buka browser ke `http://localhost:3000` — kalau muncul "Server jalan! 🚀",
-   berarti sukses.
 
-## Daftar Endpoint
-
-### 1. Daftar akun baru
-```
-POST /auth/register
-Body (JSON): { "email": "budi@mail.com", "password": "rahasia123" }
+```bash
+npm start
 ```
 
-### 2. Login
-```
-POST /auth/login
-Body (JSON): { "email": "budi@mail.com", "password": "rahasia123" }
+5. Buka: `http://localhost:3000` — seharusnya merespon JSON dengan `ShiftBoard API Server`.
 
-Response: { "token": "xxxxx", "user": { "id": 1, "email": "budi@mail.com" } }
-```
-Simpan `token` ini di app kamu (misal di local storage/secure storage),
-dipakai buat semua request ke `/data`.
+## Environment variables yang wajib/utama
+Tambahkan dan isi variabel-variabel ini di `.env` (atau set sebagai secret di platform deploy):
 
-### 3. Ambil semua data
-```
-GET /data
-Header: Authorization: Bearer <token>
-```
+- `PORT` — port server (opsional, default 3000)
+- `JWT_SECRET` — kunci rahasia untuk menandatangani/verifikasi JWT
+- `ADMIN_EMAIL` — email admin yang akan dibuat otomatis saat server pertama kali start
+- `ADMIN_PASSWORD` — password admin (akan di-hash sebelum disimpan)
+- `FIREBASE_SERVICE_ACCOUNT_BASE64` — Service Account JSON untuk Firebase Admin yang sudah di-encode ke Base64
 
-### 4. Simpan data baru
-```
-POST /data
-Header: Authorization: Bearer <token>
-Body (JSON): { "title": "Judul", "content": "Isi catatan" }
-```
-
-### 5. Edit data
-```
-PUT /data/1
-Header: Authorization: Bearer <token>
-Body (JSON): { "title": "Judul baru", "content": "Isi baru" }
-```
-
-### 6. Hapus data
-```
-DELETE /data/1
-Header: Authorization: Bearer <token>
-```
-
-## Endpoint Jadwal Shift (baru)
-
-### Karyawan
+Contoh singkat `.env` (JANGAN commit ini ke repo):
 
 ```
-GET /karyawan
-```
-Ambil semua karyawan. Publik, tidak perlu login.
-
-```
-POST /karyawan
-Header: Authorization: Bearer <token admin>
-Body (JSON): { "nama": "Budi", "title": "NEK" }
-```
-Tambah karyawan baru. Khusus admin.
-
-```
-DELETE /karyawan/1
-Header: Authorization: Bearer <token admin>
-```
-Hapus karyawan berdasarkan nomor (`no`). Khusus admin.
-
-### Absensi
-
-```
-GET /absensi
-```
-Ambil semua log absensi (terbaru dulu). Publik.
-
-```
-POST /absensi
-Body (multipart/form-data):
-  nama: "Budi"
-  foto: <file gambar>
-```
-Simpan absensi baru + upload foto. Publik, tidak perlu login. Foto tersimpan
-di folder `uploads/` dan bisa diakses lewat `foto_url` yang dikembalikan
-(misalnya `https://server-kamu/uploads/Budi_2026-07-21T...jpg`).
-
-## Akun Admin
-
-Akun admin dibuat **otomatis** saat server pertama kali jalan, berdasarkan
-`ADMIN_EMAIL` dan `ADMIN_PASSWORD` di file `.env`. Login sebagai admin lewat
-endpoint yang sama seperti user biasa:
-
-```
-POST /auth/login
-Body (JSON): { "email": "admin@shiftapp.com", "password": "..." }
+PORT=3000
+JWT_SECRET=isi_dengan_teks_rahasia_panjang
+ADMIN_EMAIL=admin@shiftapp.com
+ADMIN_PASSWORD=rahasia_admin
+FIREBASE_SERVICE_ACCOUNT_BASE64=eyJ0eXAiOiJKV1QiL... (panjang)
 ```
 
-Token yang didapat dari login ini punya akses ke endpoint khusus admin
-(`POST /karyawan`, `DELETE /karyawan/:no`).
+### Cara membuat FIREBASE_SERVICE_ACCOUNT_BASE64
+- Dari Linux/macOS (bash):
 
-## Cara App Mobile/Web Kamu Manggil Server Ini
-
-Contoh dari JavaScript (web) atau React Native (mobile), sama caranya:
-
-```js
-// Login
-const res = await fetch('http://ALAMAT-SERVER-KAMU:3000/auth/login', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ email: 'budi@mail.com', password: 'rahasia123' }),
-});
-const data = await res.json();
-const token = data.token; // simpan token ini
-
-// Ambil data (butuh token)
-const res2 = await fetch('http://ALAMAT-SERVER-KAMU:3000/data', {
-  headers: { 'Authorization': `Bearer ${token}` },
-});
-const items = await res2.json();
+```bash
+cat serviceAccountKey.json | base64 | tr -d '\n' > serviceAccount_base64.txt
 ```
 
-Kalau develop di HP fisik/emulator, ganti `localhost` dengan alamat IP
-komputer kamu di jaringan yang sama (misal `192.168.1.5`).
+- Atau (node):
 
-## Deploy ke Internet (biar bisa diakses dari mana saja)
+```bash
+node -e "console.log(Buffer.from(require('./serviceAccountKey.json')).toString('base64'))" > serviceAccount_base64.txt
+```
 
-Kalau mau app kamu bisa dipakai orang lain (bukan cuma di laptop sendiri),
-server ini perlu di-deploy ke VPS/hosting, misalnya:
-- **Railway** atau **Render** — paling gampang buat pemula, tinggal connect
-  repo GitHub, otomatis jalan
-- **DigitalOcean/Contabo VPS** — lebih fleksibel tapi perlu setup manual
-  (install Node.js, pakai PM2 biar server nggak mati, Nginx buat domain)
+- PowerShell (Windows):
 
-Kalau sudah siap ke tahap ini, bilang aja, nanti aku bantu step-by-step
-deploy-nya juga.
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("serviceAccountKey.json")) > serviceAccount_base64.txt
+```
+
+Copy isi file `serviceAccount_base64.txt` ke value `FIREBASE_SERVICE_ACCOUNT_BASE64` di `.env`.
+
+PENTING: jangan commit `serviceAccountKey.json` atau isi base64-nya ke repository publik. Gunakan secret manager di platform hosting.
+
+## Perbedaan penting (README lama vs kode)
+- README lama menyebut SQLite (`app.db`) — saat ini kode menggunakan Firestore lewat `models/db.js`. Jika kamu ingin kembali ke SQLite, ubah `models/db.js` dan bagian inisialisasi database.
+- `models/db.js` membuat akun admin otomatis berdasarkan `ADMIN_EMAIL`/`ADMIN_PASSWORD` jika belum ada.
+
+## Folder `uploads`
+Server meng-serve folder `uploads/` sebagai statis (`/uploads`). Pastikan folder ini ada dan dapat ditulis oleh proses Node. Kamu bisa membuatnya sebelum menjalankan server:
+
+```bash
+mkdir -p uploads
+chmod 755 uploads
+```
+
+## Daftar endpoint (singkat)
+- POST /auth/register — daftar akun
+- POST /auth/login — login (mengembalikan token JWT)
+- GET /data, POST /data, PUT /data/:id, DELETE /data/:id — operasi data user (butuh Authorization: Bearer <token>)
+- GET /karyawan — publik
+- POST /karyawan, DELETE /karyawan/:no — admin saja
+- GET /absensi, POST /absensi — simpan absensi + upload foto (multipart/form-data)
+- POST /api/chat — endpoint chat AI (periksa konfigurasi & dependensi)
+
+Lihat implementasi di folder `routes/` untuk detail parameter dan respons.
+
+## Keamanan & deploy
+- Jangan commit kredensial ke repo.
+- Di deploy (Railway/Render/VPS), simpan `FIREBASE_SERVICE_ACCOUNT_BASE64` dan `JWT_SECRET` sebagai secret/environment.
+- Pastikan rules Firestore sesuai kebutuhan dan hanya admin mendapat akses admin-only di aplikasi.
+
+---
+Jika mau, saya bisa:
+- Memperbarui juga `.env.example` agar mencantumkan variabel baru dan contoh format base64, atau
+- Membuat PR yang menambahkan pengecekan saat server start (cek env vars & buat folder `uploads` otomatis).
+
+Katakan mana yang kamu mau, saya akan lanjutkan.
