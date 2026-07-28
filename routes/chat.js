@@ -99,7 +99,9 @@ async function ambilKonteksData() {
   teks += `\nHari ini: ${namaHari}, ${sekarang.getDate()} ${bulanIni.judul.split(" ")[0]} ${sekarang.getFullYear()} (waktu WIB/Asia Jakarta, ini sumber kebenaran satu-satunya soal tanggal dan hari, jangan dihitung ulang).\n`;
 
   teks += `\nPola shift berlaku sama untuk semua karyawan tiap harinya, siklus 12 hari (OFF-2-2-2-OFF-1-1-1-OFF-3-3-3), dimulai dari 1 Maret 2026.\n`;
-
+  
+  teks += `\nKeterangan jam kerja: Shift 1 = Malam, Shift 2 = Pagi, Shift 3 = Sore.\n`;
+ 
   teks += `\nJadwal shift bulan ${bulanIni.judul} (bulan berjalan):\n${bulanIni.detail}\n${bulanIni.ringkasan}\n`;
 
   teks += `\nJadwal shift bulan ${bulanDepan.judul} (bulan depan):\n${bulanDepan.detail}\n${bulanDepan.ringkasan}\n`;
