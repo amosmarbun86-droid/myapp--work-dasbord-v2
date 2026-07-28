@@ -33,7 +33,8 @@ function buatRingkasanBulan(tahun, bulanIndex) {
   for (let i = 1; i <= jumlahHari; i++) {
     const shift = getShiftTanggal(tahun, bulanIndex, i);
     counts[shift]++;
-    baris.push(`${i} ${namaBulan[bulanIndex]}: ${shift === "OFF" ? "OFF (libur)" : "Shift " + shift}`);
+    const labelShift = { "1": "Malam", "2": "Pagi", "3": "Sore" };
+baris.push(`${i} ${namaBulan[bulanIndex]}: ${shift === "OFF" ? "OFF (libur)" : "Shift " + shift + " (" + labelShift[shift] + ")"}`);
   }
 
   return {
