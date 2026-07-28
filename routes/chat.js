@@ -7,6 +7,13 @@ const router = express.Router();
 const POLA_SHIFT = ["OFF", "2", "2", "2", "OFF", "1", "1", "1", "OFF", "3", "3", "3"];
 const ANCHOR_TANGGAL = Date.UTC(2026, 2, 1); // 1 Maret 2026 (bulan di JS mulai dari 0)
 
+// Ambil waktu sekarang yang sudah dikonversi ke zona WIB (Asia/Jakarta),
+// supaya tidak salah tanggal/hari akibat server Render pakai UTC.
+function ambilWaktuJakartaSekarang() {
+  const jakartaString = new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" });
+  return new Date(jakartaString);
+}
+
 function getShiftTanggal(tahun, bulanIndex, tanggal) {
   const target = Date.UTC(tahun, bulanIndex, tanggal);
   const diffHari = Math.floor((target - ANCHOR_TANGGAL) / (24 * 60 * 60 * 1000));
@@ -80,13 +87,15 @@ async function ambilKonteksData() {
     teks += "\n(Gagal mengambil data absensi)\n";
   }
 
-  // Jadwal shift bulan ini & bulan depan
-  const sekarang = new Date();
+  // Jadwal shift bulan ini & bulan depan (semua dihitung berdasarkan waktu WIB, bukan UTC server)
+  const sekarang = ambilWaktuJakartaSekarang();
+  const namaHari = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"][sekarang.getDay()];
+
   const bulanIni = buatRingkasanBulan(sekarang.getFullYear(), sekarang.getMonth());
   const tanggalBulanDepan = new Date(sekarang.getFullYear(), sekarang.getMonth() + 1, 1);
   const bulanDepan = buatRingkasanBulan(tanggalBulanDepan.getFullYear(), tanggalBulanDepan.getMonth());
 
-  teks += `\nHari ini: ${sekarang.getDate()} ${bulanIni.judul.split(" ")[0]} ${sekarang.getFullYear()} (catatan: berdasarkan waktu server, bisa beda beberapa jam dengan waktu lokal HP).\n`;
+  teks += `\nHari ini: ${namaHari}, ${sekarang.getDate()} ${bulanIni.judul.split(" ")[0]} ${sekarang.getFullYear()} (waktu WIB/Asia Jakarta, ini sumber kebenaran satu-satunya soal tanggal dan hari, jangan dihitung ulang).\n`;
 
   teks += `\nPola shift berlaku sama untuk semua karyawan tiap harinya, siklus 12 hari (OFF-2-2-2-OFF-1-1-1-OFF-3-3-3), dimulai dari 1 Maret 2026.\n`;
 
@@ -100,7 +109,7 @@ async function ambilKonteksData() {
 // Chat AI
 router.post("/", async (req, res) => {
   try {
-    const { message } = req.body;
+    const { message, history } = req.body;
 
     if (!message || message.trim() === "") {
       return res.status(400).json({
@@ -118,11 +127,27 @@ Tugasmu:
 - Bersikap ramah, profesional, dan singkat.
 - Membantu tentang absensi, jadwal kerja, shift, data karyawan, cuti, dan penggunaan aplikasi ShiftBoard.
 - Kalau pertanyaan berhubungan dengan data karyawan/absensi/jadwal shift, jawab berdasarkan data di bawah ini. Jangan mengarang data yang tidak ada.
+- SOAL TANGGAL DAN HARI: gunakan PERSIS informasi "Hari ini: ..." di data di bawah, JANGAN pernah menghitung atau menebak nama hari sendiri, karena kamu sering salah hitung.
 - Kalau user tanya soal tanggal/bulan di luar data yang diberikan (misal lebih dari 2 bulan ke depan), bilang terus terang kalau datanya belum tersedia, jangan menebak.
 - Jika pertanyaan di luar ShiftBoard, tetap jawab dengan baik.
 
 Data project ShiftBoard saat ini:
 ${konteksData}`;
+
+    const messages = [{ role: "system", content: systemPrompt }];
+
+    if (Array.isArray(history)) {
+      history.forEach((h) => {
+        if (h && h.role && h.text) {
+          messages.push({
+            role: h.role === "ai" ? "assistant" : "user",
+            content: h.text,
+          });
+        }
+      });
+    }
+
+    messages.push({ role: "user", content: message });
 
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
@@ -132,10 +157,7 @@ ${konteksData}`;
       },
       body: JSON.stringify({
         model: "llama-3.3-70b-versatile",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: message },
-        ],
+        messages,
       }),
     });
 
