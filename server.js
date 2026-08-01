@@ -10,6 +10,7 @@ const authRoutes = require('./routes/auth');
 const dataRoutes = require('./routes/data');
 const karyawanRoutes = require('./routes/karyawan');
 const absensiRoutes = require('./routes/absensi');
+const breakRoutes = require('./routes/break');
 const chatRoutes = require('./routes/chat'); // AI Chat
 
 const checkToken = require('./middleware/checkToken');
@@ -54,6 +55,11 @@ app.use('/karyawan', karyawanRoutes);
 // ABSENSI
 // =====================
 app.use('/absensi', absensiRoutes);
+
+// =====================
+// BREAK
+// =====================
+app.use('/break', breakRoutes);
 
 // =====================
 // AI CHAT
