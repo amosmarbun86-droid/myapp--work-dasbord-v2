@@ -53,24 +53,121 @@ function buatRingkasanBulan(tahun, bulanIndex) {
   };
 }
 
-// ===== Libur nasional resmi (Nager.Date, publik & gratis) =====
-async function ambilLiburNasional(tahun) {
+// ===== Libur nasional resmi — sumber SAMA dengan app Android: Google Calendar ICS =====
+const ICS_URL =
+  "https://calendar.google.com/calendar/ical/en.indonesian%23holiday%40group.v.calendar.google.com/public/basic.ics";
+
+// Kamus terjemahan nama libur (sama persis dengan ActivityJadwalActivity.java)
+const KAMUS_LIBUR = {
+  "New Year's Day": "Tahun Baru Masehi",
+  "New Year's Eve": "Malam Tahun Baru Masehi",
+  "Chinese New Year's Day": "Tahun Baru Imlek",
+  "Chinese New Year Joint Holiday": "Cuti Bersama Tahun Baru Imlek",
+  "Ascension of the Prophet Muhammad": "Isra Mikraj Nabi Muhammad",
+  "Bali's Day of Silence and Hindu New Year (Nyepi)": "Hari Raya Nyepi (Tahun Baru Saka)",
+  "Joint Holiday for Bali's Day of Silence and Hindu New Year (Nyepi)": "Cuti Bersama Hari Raya Nyepi",
+  "Idul Fitri": "Hari Raya Idul Fitri",
+  "Idul Fitri Holiday": "Libur Idul Fitri",
+  "Idul Fitri Joint Holiday": "Cuti Bersama Idul Fitri",
+  "Good Friday": "Wafat Isa Almasih (Jumat Agung)",
+  "Easter Sunday": "Hari Paskah",
+  "International Labor Day": "Hari Buruh Internasional",
+  "Ascension Day of Jesus Christ": "Kenaikan Isa Almasih",
+  "Joint Holiday after Ascension Day": "Cuti Bersama setelah Kenaikan Isa Almasih",
+  "Idul Adha": "Hari Raya Idul Adha",
+  "Joint Holiday for Idul Adha": "Cuti Bersama Idul Adha",
+  "Waisak Day (Buddha's Anniversary)": "Hari Raya Waisak",
+  "Joint Holiday for Waisak Day": "Cuti Bersama Hari Raya Waisak",
+  "Pancasila Day": "Hari Lahir Pancasila",
+  "Muharram / Islamic New Year": "Tahun Baru Islam (1 Muharram)",
+  "Muharram / Islamic New Year Holiday": "Libur Tahun Baru Islam",
+  "Maulid Nabi Muhammad": "Maulid Nabi Muhammad",
+  "Day off for Maulid Nabi Muhammad": "Cuti Bersama Maulid Nabi Muhammad",
+  "Indonesian Independence Day": "Hari Kemerdekaan Republik Indonesia",
+  "Indonesian Independence Day observed": "Peringatan Hari Kemerdekaan Republik Indonesia",
+  "Christmas Eve": "Malam Natal",
+  "Christmas Eve Joint Holiday": "Cuti Bersama Malam Natal",
+  "Christmas Day": "Hari Raya Natal",
+  "Boxing Day": "Hari Setelah Natal",
+  "Joint Holiday (Cuti Bersama)": "Cuti Bersama",
+  "Ramadan Start": "Awal Bulan Ramadan",
+  "Election Day": "Hari Pemilihan Umum",
+  "Diwali": "Hari Raya Diwali",
+};
+
+// Cache sederhana biar tidak fetch ICS berulang kali tiap ada chat masuk
+let cacheLiburIcs = null;
+let cacheLiburWaktu = 0;
+const CACHE_DURASI_MS = 6 * 60 * 60 * 1000; // 6 jam
+
+// Ambil ICS Google Calendar & parse jadi list event { tahun, bulan(1-12), tanggal, namaIndo }
+// Logika regex-nya sama persis dengan yang di ActivityJadwalActivity.java (Android)
+async function ambilLiburIcsMentah() {
+  const sekarangMs = Date.now();
+  if (cacheLiburIcs && sekarangMs - cacheLiburWaktu < CACHE_DURASI_MS) {
+    return cacheLiburIcs;
+  }
+
   try {
-    const res = await fetch(`https://date.nager.at/api/v3/PublicHolidays/${tahun}/ID`);
-    if (!res.ok) return [];
-    return await res.json();
+    const res = await fetch(ICS_URL);
+    if (!res.ok) return cacheLiburIcs || [];
+
+    const rawIcs = await res.text();
+    // Unfold baris terlipat ICS (baris lanjutan diawali 1 spasi) — sama seperti di Android
+    const ics = rawIcs.replace(/\r\n/g, "\n").replace(/\n /g, "");
+
+    const pEvent = /BEGIN:VEVENT([\s\S]*?)END:VEVENT/g;
+    const pDate = /DTSTART;VALUE=DATE:(\d{8})/;
+    const pName = /SUMMARY:(.*)/;
+
+    const daftar = [];
+    let mEvent;
+    while ((mEvent = pEvent.exec(ics)) !== null) {
+      const block = mEvent[1];
+      const mDate = pDate.exec(block);
+      const mName = pName.exec(block);
+      if (!mDate || !mName) continue;
+
+      const tgl8 = mDate[1];
+      const tahun = parseInt(tgl8.substring(0, 4), 10);
+      const bulan = parseInt(tgl8.substring(4, 6), 10); // 1-12
+      const tanggal = parseInt(tgl8.substring(6, 8), 10);
+      const namaAsli = mName[1].replace(/\r/g, "").trim();
+
+      const tentatif = namaAsli.endsWith("(tentative)");
+      const namaBersih = tentatif
+        ? namaAsli.slice(0, namaAsli.length - "(tentative)".length).trim()
+        : namaAsli;
+      let namaIndo = KAMUS_LIBUR[namaBersih] || namaAsli;
+      if (tentatif) namaIndo = namaIndo + " (belum pasti)";
+
+      daftar.push({ tahun, bulan, tanggal, namaIndo });
+    }
+
+    cacheLiburIcs = daftar;
+    cacheLiburWaktu = sekarangMs;
+    return daftar;
   } catch (err) {
-    return [];
+    // Kalau fetch/parsing gagal, pakai cache lama kalau ada, biar tidak tiba-tiba kosong total
+    return cacheLiburIcs || [];
   }
 }
 
+async function ambilLiburNasional(tahun) {
+  const semua = await ambilLiburIcsMentah();
+  return semua.filter((h) => h.tahun === tahun);
+}
+
 function formatLiburBulan(liburList, tahun, bulanIndex, judulBulan) {
-  const bulanStr = String(bulanIndex + 1).padStart(2, "0");
-  const cocok = liburList.filter((h) => h.date.startsWith(`${tahun}-${bulanStr}`));
+  const bulanKe = bulanIndex + 1; // 1-12, cocok dengan field "bulan" hasil parsing ICS
+  const cocok = liburList
+    .filter((h) => h.tahun === tahun && h.bulan === bulanKe)
+    .sort((a, b) => a.tanggal - b.tanggal);
+
   if (cocok.length === 0) {
     return `Tidak ada hari libur nasional resmi di bulan ${judulBulan}.`;
   }
-  return cocok.map((h) => `- ${h.date.split("-")[2]} ${judulBulan}: ${h.localName}`).join("\n");
+  return cocok.map((h) => `- ${h.tanggal} ${judulBulan}: ${h.namaIndo}`).join("\n");
 }
 
 // Cek apakah API aktif
