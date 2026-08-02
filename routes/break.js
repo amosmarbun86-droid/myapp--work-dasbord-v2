@@ -43,6 +43,30 @@ router.get('/', async (req, res) => {
   }
 });
 
+// GET /break/aktif -> daftar SEMUA karyawan yang SEDANG break sekarang
+router.get('/aktif', async (req, res) => {
+  try {
+    const snapshot = await db.collection('break').get();
+    const perNama = {};
+
+    snapshot.forEach((doc) => {
+      const data = doc.data();
+      if (!perNama[data.nama] || new Date(data.waktu) > new Date(perNama[data.nama].waktu)) {
+        perNama[data.nama] = data;
+      }
+    });
+
+    const aktif = Object.values(perNama)
+      .filter((r) => r.aksi === 'mulai')
+      .map((r) => ({ nama: r.nama, waktuMulai: r.waktu }));
+
+    res.json(aktif);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Gagal mengambil daftar break aktif.' });
+  }
+});
+
 // GET /break/status?nama=... -> cek apakah karyawan ini SEDANG break
 router.get('/status', async (req, res) => {
   const { nama } = req.query;
