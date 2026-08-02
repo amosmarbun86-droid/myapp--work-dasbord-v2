@@ -7,10 +7,28 @@ const router = express.Router();
 const POLA_SHIFT = ["OFF", "2", "2", "2", "OFF", "1", "1", "1", "OFF", "3", "3", "3"];
 const ANCHOR_TANGGAL = Date.UTC(2026, 2, 1); // 1 Maret 2026 (bulan di JS mulai dari 0)
 
+// ===== Jam mulai tiap shift (WIB) & toleransi telat =====
+const JAM_MULAI_SHIFT = {
+  "1": { jam: 0, menit: 0 },   // Malam
+  "2": { jam: 8, menit: 0 },   // Pagi
+  "3": { jam: 16, menit: 0 },  // Sore
+};
+const TOLERANSI_TELAT_MENIT = 10;
+
 // Ambil waktu sekarang yang sudah dikonversi ke zona WIB (Asia/Jakarta)
 function ambilWaktuJakartaSekarang() {
   const jakartaString = new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" });
   return new Date(jakartaString);
+}
+
+// Konversi sembarang waktu (ISO string / Date) ke waktu WIB
+function keWaktuJakarta(waktuInput) {
+  const jakartaString = new Date(waktuInput).toLocaleString("en-US", { timeZone: "Asia/Jakarta" });
+  return new Date(jakartaString);
+}
+
+function samaHari(a, b) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
 function getShiftTanggal(tahun, bulanIndex, tanggal) {
@@ -170,6 +188,113 @@ function formatLiburBulan(liburList, tahun, bulanIndex, judulBulan) {
   return cocok.map((h) => `- ${h.tanggal} ${judulBulan}: ${h.namaIndo}`).join("\n");
 }
 
+// ===== BARU: status break (sedang break / belum break hari ini) =====
+async function ambilKonteksBreak(daftarNamaKaryawan, sekarangJakarta) {
+  try {
+    const snapshot = await db.collection("break").get();
+
+    const semuaRecord = snapshot.docs.map((doc) => doc.data());
+
+    // Cari record TERAKHIR per nama (untuk tahu status sekarang: sedang break atau tidak)
+    const terakhirPerNama = {};
+    semuaRecord.forEach((r) => {
+      if (!terakhirPerNama[r.nama] || new Date(r.waktu) > new Date(terakhirPerNama[r.nama].waktu)) {
+        terakhirPerNama[r.nama] = r;
+      }
+    });
+
+    const sedangBreak = Object.values(terakhirPerNama)
+      .filter((r) => r.aksi === "mulai")
+      .map((r) => r.nama);
+
+    // Nama yang punya MINIMAL 1 record (apapun aksinya) HARI INI -> dianggap "sudah break hari ini"
+    const sudahBreakHariIniSet = new Set();
+    semuaRecord.forEach((r) => {
+      const waktuRecordJakarta = keWaktuJakarta(r.waktu);
+      if (samaHari(waktuRecordJakarta, sekarangJakarta)) {
+        sudahBreakHariIniSet.add(r.nama);
+      }
+    });
+
+    const belumBreakHariIni = daftarNamaKaryawan.filter(
+      (nama) => !sudahBreakHariIniSet.has(nama) && !sedangBreak.includes(nama)
+    );
+
+    let teks = "\nStatus break karyawan (data real-time):\n";
+    teks += sedangBreak.length > 0
+      ? `- Sedang break sekarang: ${sedangBreak.join(", ")}\n`
+      : "- Tidak ada yang sedang break sekarang.\n";
+    teks += belumBreakHariIni.length > 0
+      ? `- Belum break sama sekali hari ini: ${belumBreakHariIni.join(", ")}\n`
+      : "- Semua karyawan sudah break hari ini (atau sedang break).\n";
+
+    return teks;
+  } catch (err) {
+    return "\n(Gagal mengambil status break)\n";
+  }
+}
+
+// ===== BARU: status telat (absen masuk lewat jam mulai shift + toleransi) =====
+async function ambilKonteksTelat(daftarKaryawan, sekarangJakarta) {
+  try {
+    const shiftHariIni = getShiftTanggal(sekarangJakarta.getFullYear(), sekarangJakarta.getMonth(), sekarangJakarta.getDate());
+
+    if (shiftHariIni === "OFF") {
+      return "\nStatus kehadiran hari ini: Hari ini jadwal semua karyawan OFF, tidak ada pengecekan telat.\n";
+    }
+
+    const jamMulai = JAM_MULAI_SHIFT[shiftHariIni];
+    const batasWaktu = new Date(sekarangJakarta);
+    batasWaktu.setHours(jamMulai.jam, jamMulai.menit + TOLERANSI_TELAT_MENIT, 0, 0);
+
+    // Ambil absensi "masuk" hari ini, per nama ambil yang paling awal
+    const absensiSnap = await db.collection("absensi").where("tipe", "==", "masuk").get();
+    const absensiHariIni = absensiSnap.docs
+      .map((doc) => doc.data())
+      .filter((a) => samaHari(keWaktuJakarta(a.waktu), sekarangJakarta));
+
+    const absenPalingAwalPerNama = {};
+    absensiHariIni.forEach((a) => {
+      if (!absenPalingAwalPerNama[a.nama] || new Date(a.waktu) < new Date(absenPalingAwalPerNama[a.nama].waktu)) {
+        absenPalingAwalPerNama[a.nama] = a;
+      }
+    });
+
+    const namaLabel = { "1": "Malam", "2": "Pagi", "3": "Sore" };
+    const jamMulaiStr = String(jamMulai.jam).padStart(2, "0") + ":" + String(jamMulai.menit).padStart(2, "0");
+
+    let teks = `\nStatus kehadiran hari ini (Shift ${shiftHariIni}/${namaLabel[shiftHariIni]}, jam mulai ${jamMulaiStr} WIB, toleransi ${TOLERANSI_TELAT_MENIT} menit):\n`;
+
+    const telat = [];
+    const tepatWaktu = [];
+    const belumAbsen = [];
+
+    daftarKaryawan.forEach((nama) => {
+      const absen = absenPalingAwalPerNama[nama];
+
+      if (absen) {
+        const waktuAbsenJakarta = keWaktuJakarta(absen.waktu);
+        if (waktuAbsenJakarta > batasWaktu) {
+          const menitTelat = Math.round((waktuAbsenJakarta - batasWaktu) / 60000);
+          telat.push(`${nama} (telat ${menitTelat} menit)`);
+        } else {
+          tepatWaktu.push(nama);
+        }
+      } else if (sekarangJakarta > batasWaktu) {
+        belumAbsen.push(nama);
+      }
+    });
+
+    teks += telat.length > 0 ? `- Telat: ${telat.join(", ")}\n` : "- Tidak ada yang telat.\n";
+    teks += belumAbsen.length > 0 ? `- Belum absen masuk sama sekali (sudah lewat jam mulai + toleransi): ${belumAbsen.join(", ")}\n` : "";
+    teks += tepatWaktu.length > 0 ? `- Tepat waktu: ${tepatWaktu.join(", ")}\n` : "";
+
+    return teks;
+  } catch (err) {
+    return "\n(Gagal mengambil status telat)\n";
+  }
+}
+
 // Cek apakah API aktif
 router.get("/", (req, res) => {
   res.json({
@@ -181,11 +306,14 @@ router.get("/", (req, res) => {
 // Ambil ringkasan data project buat dikasih ke AI sebagai konteks
 async function ambilKonteksData() {
   let teks = "";
+  let daftarNamaKaryawan = [];
 
   // Karyawan
   try {
     const karyawanSnap = await db.collection("karyawan").orderBy("no", "asc").get();
     const karyawan = karyawanSnap.docs.map((doc) => doc.data());
+    daftarNamaKaryawan = karyawan.map((k) => k.nama).filter(Boolean);
+
     if (karyawan.length > 0) {
       teks += "Daftar karyawan saat ini:\n";
       karyawan.forEach((k) => {
@@ -242,6 +370,10 @@ async function ambilKonteksData() {
   teks += `\nLibur nasional resmi bulan ${bulanIni.judul}:\n${formatLiburBulan(liburTahunIni, tahunIni, sekarang.getMonth(), bulanIni.judul)}\n`;
   teks += `\nLibur nasional resmi bulan ${bulanDepan.judul}:\n${formatLiburBulan(liburTahunDepan, tahunDepan, tanggalBulanDepan.getMonth(), bulanDepan.judul)}\n`;
 
+  // BARU: status break & status telat
+  teks += await ambilKonteksBreak(daftarNamaKaryawan, sekarang);
+  teks += await ambilKonteksTelat(daftarNamaKaryawan, sekarang);
+
   return teks;
 }
 
@@ -267,20 +399,23 @@ ShiftBoard adalah aplikasi manajemen jadwal shift kerja & absensi karyawan, ters
 Fitur-fitur yang tersedia:
 1. JADWAL SHIFT — jadwal otomatis berdasarkan pola berulang 12 hari: OFF, Shift 2 (Pagi), Shift 2, Shift 2, OFF, Shift 1 (Malam), Shift 1, Shift 1, OFF, Shift 3 (Sore), Shift 3, Shift 3 -- lalu berulang. Pola ini sama untuk semua karyawan, mulai dihitung dari 1 Maret 2026. Bisa dilihat per bulan, dan bisa dibagikan sebagai gambar ke WhatsApp/galeri/dll.
 2. ABSENSI — karyawan absen Masuk atau Keluar dengan mengambil foto lewat kamera langsung di aplikasi. Foto dan waktu absen tersimpan otomatis ke server.
-3. ADMIN PANEL — khusus admin (login dengan email & password), bisa menambah karyawan baru dan menghapus karyawan.
-4. CHATBOT AI (ini kamu) — membantu menjawab pertanyaan seputar jadwal, absensi, dan cara pakai aplikasi.
+3. BREAK — admin bisa mencatat kapan karyawan mulai dan selesai istirahat/break, per karyawan, bisa banyak orang break bersamaan.
+4. ADMIN PANEL — khusus admin (login dengan email & password), bisa menambah karyawan baru dan menghapus karyawan.
+5. CHATBOT AI (ini kamu) — membantu menjawab pertanyaan seputar jadwal, absensi, break, dan cara pakai aplikasi.
 
 Cara pakai singkat:
 - Untuk absen: buka menu Absensi, pilih tombol Absen Masuk atau Absen Keluar, lalu ambil foto lewat kamera.
 - Untuk lihat jadwal: buka menu Jadwal Shift, pilih bulan dan tahun, lalu jadwal akan tampil per karyawan dalam bentuk kotak berwarna (biru=Malam, hijau=Pagi, kuning=Sore, merah=OFF).
+- Untuk break: buka menu Break, pilih nama karyawan, tekan Mulai Break saat mulai istirahat, tekan Selesai Break saat kembali kerja.
 - Untuk tambah/hapus karyawan: hanya admin yang login yang bisa melakukan ini lewat menu Admin.
 
 === TUGASMU ===
 - Jawab dalam Bahasa Indonesia, ramah, profesional, dan tidak bertele-tele.
 - Kalau ditanya soal fitur atau cara pakai aplikasi, jawab berdasarkan penjelasan di atas.
-- Kalau pertanyaan berhubungan dengan data karyawan/absensi/jadwal shift, jawab berdasarkan data di bawah ini. Jangan mengarang data yang tidak ada.
+- Kalau pertanyaan berhubungan dengan data karyawan/absensi/jadwal shift/break/telat, jawab berdasarkan data di bawah ini. Jangan mengarang data yang tidak ada.
 - SOAL TANGGAL DAN HARI: gunakan data jadwal di bawah yang SUDAH LENGKAP dengan hari dan tanggal. Jawab PERSIS dari data yang diberikan, JANGAN pernah menghitung atau menebak nama hari sendiri.
 - SOAL LIBUR NASIONAL: gunakan PERSIS data libur nasional resmi yang tertera di bawah, jangan menebak tanggal merah sendiri.
+- SOAL BREAK DAN TELAT: gunakan PERSIS status real-time yang tertera di bawah (siapa sedang break, siapa belum break, siapa telat, siapa belum absen). Jangan menebak atau mengasumsikan status siapapun yang tidak disebutkan di data.
 - Kalau user tanya soal tanggal/bulan di luar data yang diberikan (misal lebih dari 2 bulan ke depan), bilang terus terang kalau datanya belum tersedia, jangan menebak.
 - Jika pertanyaan di luar topik ShiftBoard, tetap jawab dengan baik seperti asisten pada umumnya.
 
