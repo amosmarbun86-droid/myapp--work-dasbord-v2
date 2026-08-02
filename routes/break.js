@@ -1,14 +1,41 @@
 // routes/break.js
+// Riwayat break karyawan tersimpan di Firestore, koleksi "break".
+// Query sengaja TIDAK pakai .orderBy() di Firestore (supaya tidak butuh
+// composite index) -- pengurutan dilakukan di kode JS setelah data diambil.
+
 const express = require('express');
 const db = require('../models/db');
 
 const router = express.Router();
 
+// Ambil record TERAKHIR (waktu paling baru) untuk 1 nama tertentu
+async function ambilRecordTerakhir(nama) {
+  const snapshot = await db.collection('break').where('nama', '==', nama).get();
+
+  if (snapshot.empty) {
+    return null;
+  }
+
+  let terbaru = null;
+
+  snapshot.forEach((doc) => {
+    const data = doc.data();
+    if (!terbaru || new Date(data.waktu) > new Date(terbaru.waktu)) {
+      terbaru = data;
+    }
+  });
+
+  return terbaru;
+}
+
 // GET /break -> ambil semua riwayat break (terbaru dulu)
 router.get('/', async (req, res) => {
   try {
-    const snapshot = await db.collection('break').orderBy('waktu', 'desc').get();
+    const snapshot = await db.collection('break').get();
     const daftar = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+
+    daftar.sort((a, b) => new Date(b.waktu) - new Date(a.waktu));
+
     res.json(daftar);
   } catch (err) {
     console.error(err);
@@ -22,19 +49,16 @@ router.get('/status', async (req, res) => {
   if (!nama) return res.status(400).json({ error: 'Parameter nama wajib diisi.' });
 
   try {
-    const snapshot = await db
-      .collection('break')
-      .where('nama', '==', nama)
-      .orderBy('waktu', 'desc')
-      .limit(1)
-      .get();
+    const terakhir = await ambilRecordTerakhir(nama);
 
-    if (snapshot.empty) return res.json({ sedangBreak: false, waktuMulai: null });
+    if (!terakhir) {
+      return res.json({ sedangBreak: false, waktuMulai: null });
+    }
 
-    const terakhir = snapshot.docs[0].data();
     if (terakhir.aksi === 'mulai') {
       return res.json({ sedangBreak: true, waktuMulai: terakhir.waktu });
     }
+
     return res.json({ sedangBreak: false, waktuMulai: null });
   } catch (err) {
     console.error(err);
@@ -53,14 +77,8 @@ router.post('/', async (req, res) => {
 
   try {
     if (aksi === 'mulai') {
-      const cekSnapshot = await db
-        .collection('break')
-        .where('nama', '==', nama)
-        .orderBy('waktu', 'desc')
-        .limit(1)
-        .get();
-
-      if (!cekSnapshot.empty && cekSnapshot.docs[0].data().aksi === 'mulai') {
+      const terakhir = await ambilRecordTerakhir(nama);
+      if (terakhir && terakhir.aksi === 'mulai') {
         return res.status(400).json({ error: nama + ' sudah sedang break.' });
       }
     }
