@@ -13,7 +13,7 @@ const JAM_MULAI_SHIFT = {
   "2": { jam: 8, menit: 0 },   // Pagi
   "3": { jam: 16, menit: 0 },  // Sore
 };
-const TOLERANSI_TELAT_MENIT = 10;
+const TOLERANSI_TELAT_MENIT = 15;
 
 // Ambil waktu sekarang yang sudah dikonversi ke zona WIB (Asia/Jakarta)
 function ambilWaktuJakartaSekarang() {
@@ -203,9 +203,8 @@ async function ambilKonteksBreak(daftarNamaKaryawan, sekarangJakarta) {
       }
     });
 
-    const sedangBreak = Object.values(terakhirPerNama)
-      .filter((r) => r.aksi === "mulai")
-      .map((r) => r.nama);
+    const sedangBreakRecords = Object.values(terakhirPerNama).filter((r) => r.aksi === "mulai");
+    const sedangBreak = sedangBreakRecords.map((r) => r.nama);
 
     // Nama yang punya MINIMAL 1 record (apapun aksinya) HARI INI -> dianggap "sudah break hari ini"
     const sudahBreakHariIniSet = new Set();
@@ -221,9 +220,17 @@ async function ambilKonteksBreak(daftarNamaKaryawan, sekarangJakarta) {
     );
 
     let teks = "\nStatus break karyawan (data real-time):\n";
-    teks += sedangBreak.length > 0
-      ? `- Sedang break sekarang: ${sedangBreak.join(", ")}\n`
-      : "- Tidak ada yang sedang break sekarang.\n";
+    if (sedangBreakRecords.length > 0) {
+      teks += "- Sedang break sekarang:\n";
+      sedangBreakRecords.forEach((r) => {
+        const mulaiJakarta = keWaktuJakarta(r.waktu);
+        const menitBerjalan = Math.round((sekarangJakarta - mulaiJakarta) / 60000);
+        const jamStr = String(mulaiJakarta.getHours()).padStart(2, "0") + ":" + String(mulaiJakarta.getMinutes()).padStart(2, "0");
+        teks += `  * ${r.nama}: mulai break jam ${jamStr} WIB, sudah berjalan ${menitBerjalan} menit\n`;
+      });
+    } else {
+      teks += "- Tidak ada yang sedang break sekarang.\n";
+    }
     teks += belumBreakHariIni.length > 0
       ? `- Belum break sama sekali hari ini: ${belumBreakHariIni.join(", ")}\n`
       : "- Semua karyawan sudah break hari ini (atau sedang break).\n";
